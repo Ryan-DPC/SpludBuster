@@ -1,0 +1,132 @@
+name: Build and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: 'Type de version'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - major
+          - minor
+          - patch
+
+permissions:
+  contents: write
+
+jobs:
+  # Job pour créer le tag
+  create-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      new_tag: ${{ steps.tag.outputs.new_tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump version and push tag
+        id: tag
+        uses: anothrNick/github-tag-action@1.67.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEFAULT_BUMP: ${{ github.event.inputs.version_bump }}
+          WITH_V: true
+          RELEASE_BRANCHES: main,master
+          TAG_CONTEXT: repo
+
+  # Job pour tester (optionnel, mais bonne pratique)
+  test:
+    runs-on: ubuntu-latest
+    needs: create-tag
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-tag.outputs.new_tag }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+  # Job pour builder l'exe Windows
+  build-windows:
+    runs-on: windows-latest
+    needs: [create-tag, test]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-tag.outputs.new_tag }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows executable
+        run: npm run build
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-executable
+          path: dist/*.exe
+          retention-days: 5
+
+  # Job pour créer la release GitHub
+  create-release:
+    runs-on: ubuntu-latest
+    needs: [create-tag, build-windows]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-tag.outputs.new_tag }}
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-executable
+          path: dist
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.create-tag.outputs.new_tag }}
+          name: Release ${{ needs.create-tag.outputs.new_tag }}
+          body: |
+            ## SpudBlaster ${{ needs.create-tag.outputs.new_tag }}
+            
+            ### 🎮 Installation
+            Téléchargez le fichier `.exe` ci-dessous et lancez l'installation.
+            
+            ### 📦 Fichiers
+            - **SpudBlaster Setup.exe** - Installateur Windows (x64)
+            
+            ### 🚀 Nouveautés
+            Cette version a été créée automatiquement via GitHub Actions.
+            
+            ---
+            *Version bump: ${{ github.event.inputs.version_bump }}*
+          draft: false
+          prerelease: false
+          files: |
+            dist/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
