@@ -2,6 +2,30 @@
 class GameScene extends Phaser.Scene {
     constructor() {
         super({ key: 'GameScene' });
+        // Online multiplayer properties
+        this.socket = null;
+        this.clientId = null;
+        this.username = null;
+        this.lobbyId = null;
+        this.remotePlayers = new Map();
+    }
+
+    init(data) {
+        // Receive data from lobby scene if coming from online mode
+        if (data && data.isOnline) {
+            this.socket = data.socket;
+            this.clientId = data.clientId;
+            this.username = data.username;
+            this.lobbyId = data.lobbyId;
+            console.log('🌐 Online mode - Lobby:', this.lobbyId);
+        } else {
+            // Solo mode - clear multiplayer data
+            this.socket = null;
+            this.clientId = null;
+            this.username = null;
+            this.lobbyId = null;
+            console.log('🎮 Solo mode');
+        }
     }
 
     preload() {
@@ -21,6 +45,11 @@ class GameScene extends Phaser.Scene {
         weapons.forEach(weapon => {
             this.load.image(`weapon_${weapon}`, `assets/weapon/${weapon}.png`);
         });
+
+        // Charger les projectiles spécifiques
+        this.load.image('projectile_fireball', 'assets/weapon/fire/fireball.png');
+        this.load.image('projectile_arrow', 'assets/weapon/Spear01.png');
+        this.load.image('projectile_bullet', 'assets/weapon/fire/bullet.png');
     }
 
     create() {
@@ -40,8 +69,10 @@ class GameScene extends Phaser.Scene {
         this.expForNextLevel = 50;
         this.gameOver = false;
 
+        // Reset online multiplayer state
+        this.remotePlayers.clear();
+
         // Système d'Inventaire (Max 4 armes)
-        // Chaque arme : { key: 'Sword01', tier: 0, lastShot: 0, cooldown: 1200 }
         this.inventory = [];
 
         // Ajouter l'arme de départ
@@ -128,6 +159,40 @@ class GameScene extends Phaser.Scene {
         this.input.keyboard.on('keydown-R', () => { if (this.gameOver) { this.scene.stop('UIScene'); this.scene.restart(); } });
         this.input.keyboard.on('keydown-M', () => { if (this.gameOver) { this.scene.stop('UIScene'); this.scene.start('MenuScene'); } });
         this.input.keyboard.on('keydown-ESC', () => { if (!this.gameOver) { this.scene.pause(); this.scene.launch('PauseScene'); } });
+
+        // Setup server listeners if online
+        if (this.socket && this.lobbyId) {
+            this.setupServerListeners();
+        }
+    }
+
+    setupServerListeners() {
+        this.socket.addEventListener('message', (e) => {
+            try {
+                const msg = JSON.parse(e.data);
+                this.handleServerMsg(msg);
+            } catch (err) {
+                console.error('Failed to parse message:', err);
+            }
+        });
+    }
+
+    handleServerMsg(msg) {
+        switch (msg.type) {
+            case 'playerJoined':
+                if (msg.clientId !== this.clientId) {
+                    this.createRemotePlayer(msg.clientId, msg.username);
+                }
+                break;
+
+            case 'playerLeft':
+                this.removeRemotePlayer(msg.clientId);
+                break;
+
+            case 'lobbyMessage':
+                this.applyLobbyPayload(msg.from, msg.payload);
+                break;
+        }
     }
 
     addWeaponToInventory(key, tier) {
@@ -137,7 +202,7 @@ class GameScene extends Phaser.Scene {
             key: key,
             tier: tier,
             lastShot: 0,
-            cooldown: 1200 // Peut varier selon l'arme plus tard
+            cooldown: 1200
         });
         return true;
     }
@@ -187,12 +252,25 @@ class GameScene extends Phaser.Scene {
                 weapon.lastShot = time;
             }
         });
+
+        // Send position update if online (throttled to ~10 times per second)
+        if (this.socket && this.lobbyId) {
+            if (!this.lastSync || time - this.lastSync > 100) {
+                this.sendGameUpdate({
+                    type: 'position',
+                    x: this.player.x,
+                    y: this.player.y,
+                    flipX: this.player.flipX,
+                    anim: this.player.anims.currentAnim?.key
+                });
+                this.lastSync = time;
+            }
+        }
     }
 
     shoot(weapon) {
         if (this.gameOver) return;
 
-        // Trouver l'ennemi le plus proche
         let closestEnemy = null;
         let closestDistance = Infinity;
 
@@ -208,42 +286,69 @@ class GameScene extends Phaser.Scene {
         if (closestEnemy) {
             angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, closestEnemy.x, closestEnemy.y);
         } else {
-            // Tir aléatoire si pas d'ennemi
             angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
         }
 
         let bullet = this.bullets.get(this.player.x, this.player.y);
         if (!bullet) {
-            bullet = this.physics.add.sprite(this.player.x, this.player.y, `weapon_${weapon.key}`);
+            let texture = `weapon_${weapon.key}`;
+            if (weapon.key.includes('Staff')) texture = 'projectile_fireball';
+            else if (weapon.key.includes('Bow')) texture = 'weapon_Spear01';
+            else if (weapon.key.includes('Revolver')) texture = 'projectile_bullet';
+
+            bullet = this.physics.add.sprite(this.player.x, this.player.y, texture);
             this.bullets.add(bullet);
         }
 
         if (bullet) {
-            bullet.setTexture(`weapon_${weapon.key}`);
+            let texture = `weapon_${weapon.key}`;
+            let scale = 2.5;
+            let rotationOffset = 0;
+            let targetSize = 30;
+
+            if (weapon.key.includes('Staff')) {
+                texture = 'projectile_fireball';
+                scale = 0.15;
+                rotationOffset = -Math.PI / 2;
+            } else if (weapon.key.includes('Bow')) {
+                texture = 'weapon_Spear01';
+                scale = 1.0;
+                rotationOffset = -Math.PI / 4;
+            } else if (weapon.key.includes('Revolver')) {
+                texture = 'projectile_bullet';
+                scale = 0.2;
+            }
+
+            bullet.setTexture(texture);
             bullet.setActive(true);
             bullet.setVisible(true);
             bullet.body.enable = true;
-            bullet.setScale(2.5);
+            bullet.setScale(scale);
 
-            // Appliquer la couleur du tier
+            if (texture !== `weapon_${weapon.key}`) {
+                let bodySize = targetSize / scale;
+                bullet.body.setSize(bodySize, bodySize);
+                bullet.body.setOffset(
+                    (bullet.width - bodySize) / 2,
+                    (bullet.height - bodySize) / 2
+                );
+            } else {
+                bullet.body.setSize(bullet.width, bullet.height);
+                bullet.body.setOffset(0, 0);
+            }
+
             const tierInfo = WEAPON_TIERS[weapon.tier];
-            bullet.setTint(tierInfo.color);
-
-            // Stocker les dégâts dans la balle pour hitEnemy
             bullet.damageMultiplier = tierInfo.multiplier;
 
             let speed = 400;
             bullet.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
-
-            // Rotation de la balle
-            bullet.rotation = angle;
+            bullet.rotation = angle + rotationOffset;
         }
     }
 
     spawnEnemy() {
         if (this.gameOver) return;
 
-        // Spawn autour du joueur à distance visible (Brotato-style)
         const spawnDistance = 600;
         const spawnAngle = Phaser.Math.FloatBetween(0, Math.PI * 2);
         const x = this.player.x + Math.cos(spawnAngle) * spawnDistance;
@@ -251,11 +356,10 @@ class GameScene extends Phaser.Scene {
 
         let enemy = this.enemies.create(x, y, 'enemy');
         enemy.setCollideWorldBounds(true);
-        enemy.setScale(0.3); // Minuscules
+        enemy.setScale(0.3);
         enemy.body.setSize(25, 25);
 
-        // Vitesse de l'ennemi RÉDUITE (Brotato commence facile)
-        let baseSpeed = 60; // Réduit de 80
+        let baseSpeed = 60;
         let difficultyMultiplier = 1;
 
         switch (this.settings.difficulty) {
@@ -279,47 +383,34 @@ class GameScene extends Phaser.Scene {
     }
 
     hitEnemy(bullet, enemy) {
-        // Désactiver la balle
         bullet.setActive(false);
         bullet.setVisible(false);
         bullet.body.enable = false;
         bullet.setVelocity(0, 0);
 
-        // Particules d'explosion
         this.createExplosion(enemy.x, enemy.y);
-
-        // Son avec volume actuel
         this.hitSound.setVolume(this.settings.volume);
         this.hitSound.play();
 
-        // Calculer les gains - RÉDUITS pour niveau 1
-        const expGained = Phaser.Math.Between(2, 5); // Réduit de 5-15
-        const goldGained = Phaser.Math.Between(1, 2); // Réduit de 1-5
+        const expGained = Phaser.Math.Between(2, 5);
+        const goldGained = Phaser.Math.Between(1, 2);
         this.totalExp += expGained;
         this.totalGold += goldGained;
 
-        // Afficher texte flottant EXP (cyan)
         this.showFloatingText(enemy.x - 15, enemy.y - 30, `+${expGained} EXP`, '#00ffff');
-        // Afficher texte flottant Gold (jaune)
         this.showFloatingText(enemy.x + 15, enemy.y - 30, `+${goldGained} G`, '#ffff00');
 
-        // Mettre à jour l'UI
         this.events.emit('updateGold', this.totalGold);
         this.events.emit('updateXP', this.totalExp % this.expForNextLevel, this.expForNextLevel);
 
-        // Vérifier montée de niveau
         this.checkLevelUp();
-
-        // Détruire l'ennemi
         enemy.destroy();
 
-        // Augmenter le score
         this.score += 10;
         this.events.emit('updateScore', this.score);
     }
 
     hitPlayer(player, enemy) {
-        // Réduire la vie - RÉDUIT à 2 dégâts au lieu de 10 (vie max = 20)
         player.health = (player.health || 20) - 2;
         this.events.emit('updateHP', player.health, 20);
 
@@ -328,10 +419,8 @@ class GameScene extends Phaser.Scene {
             this.endGame();
         }
 
-        // Détruire l'ennemi
         enemy.destroy();
 
-        // Flash rouge
         player.setTint(0xff0000);
         this.time.delayedCall(100, () => {
             if (player && player.active) {
@@ -341,7 +430,6 @@ class GameScene extends Phaser.Scene {
     }
 
     createExplosion(x, y) {
-        // Créer quelques particules simples
         for (let i = 0; i < 8; i++) {
             let particle = this.add.circle(
                 x, y,
@@ -361,26 +449,19 @@ class GameScene extends Phaser.Scene {
         }
     }
 
-    // updateHealthBar et updateExpBar supprimés (déplacés dans UIScene)
-
     checkLevelUp() {
-        // Vérifier si le joueur monte de niveau
         while (this.totalExp >= this.expForNextLevel * this.playerLevel) {
             this.playerLevel++;
 
-            // Effet visuel de montée de niveau
             this.cameras.main.flash(200, 0, 150, 255);
             this.showFloatingText(this.player.x, this.player.y - 50, `LEVEL UP!\nLVL ${this.playerLevel}`, '#00ff00');
 
-            // Augmenter légèrement les stats du joueur
             this.player.health = Math.min(20, this.player.health + 2);
             this.settings.playerSpeed += 5;
 
-            // Mettre à jour le texte de niveau
             this.events.emit('levelUp', this.playerLevel);
             this.events.emit('updateHP', this.player.health, 20);
 
-            // Le prochain niveau nécessite plus d'XP
             this.expForNextLevel = ~~(this.expForNextLevel * 1.5);
         }
     }
@@ -394,13 +475,11 @@ class GameScene extends Phaser.Scene {
             strokeThickness: 3
         }).setOrigin(0.5);
 
-        // Animation de montée et disparition
         this.tweens.add({
             targets: floatingText,
             y: y - 50,
             alpha: 0,
             duration: 1000,
-
             ease: 'Power2',
             onComplete: () => floatingText.destroy()
         });
@@ -408,14 +487,10 @@ class GameScene extends Phaser.Scene {
 
     endWave() {
         this.isWaveActive = false;
-
-        // Tuer tous les ennemis
         this.enemies.clear(true, true);
 
-        // Arrêter le spawn
         if (this.spawnEvent) this.spawnEvent.remove();
 
-        // Ouvrir le shop
         this.scene.pause();
         this.scene.launch('ShopScene', {
             gameScene: this,
@@ -430,14 +505,13 @@ class GameScene extends Phaser.Scene {
         this.scene.stop('ShopScene');
 
         this.currentWave++;
-        this.waveTimer = 60; // Reset timer
+        this.waveTimer = 60;
         this.isWaveActive = true;
 
         this.events.emit('updateWaveNumber', this.currentWave);
 
-        // Relancer le spawn
         this.spawnEvent = this.time.addEvent({
-            delay: Math.max(500, 1500 - (this.currentWave * 100)), // Plus rapide chaque vague
+            delay: Math.max(500, 1500 - (this.currentWave * 100)),
             callback: this.spawnEnemy,
             callbackScope: this,
             loop: true
@@ -447,16 +521,70 @@ class GameScene extends Phaser.Scene {
     endGame() {
         this.gameOver = true;
         this.player.setVelocity(0, 0);
-        // Afficher les statistiques
         this.events.emit('gameOver', {
             score: this.score,
             totalExp: this.totalExp,
             totalGold: this.totalGold
         });
 
-        // Arrêter tous les ennemis
         this.enemies.children.entries.forEach(enemy => {
             enemy.setVelocity(0, 0);
         });
+    }
+
+    // ==================== ONLINE MULTIPLAYER ====================
+
+    sendGameUpdate(payload) {
+        if (!this.socket || !this.lobbyId) return;
+        this.socket.send(JSON.stringify({ type: 'lobbyMessage', payload }));
+    }
+
+    applyLobbyPayload(fromClientId, payload) {
+        if (fromClientId === this.clientId) return;
+
+        const remote = this.remotePlayers.get(fromClientId);
+        if (!remote) return;
+
+        if (payload.type === 'position') {
+            remote.sprite.setPosition(payload.x, payload.y);
+            remote.sprite.flipX = payload.flipX;
+            if (payload.anim && remote.sprite.anims.currentAnim?.key !== payload.anim) {
+                remote.sprite.play(payload.anim);
+            }
+            remote.nameText.setPosition(payload.x, payload.y - 100);
+        }
+    }
+
+    createRemotePlayer(clientId, username) {
+        if (this.remotePlayers.has(clientId)) return;
+
+        const sprite = this.physics.add.sprite(
+            this.player.x + 100,
+            this.player.y,
+            'characterSheet',
+            0
+        );
+        sprite.setScale(6.0);
+        sprite.setTint(0x88ff88);
+        sprite.play('characterIdle');
+
+        const nameText = this.add.text(sprite.x, sprite.y - 100, username, {
+            fontSize: '12px',
+            fill: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 2
+        }).setOrigin(0.5);
+
+        this.remotePlayers.set(clientId, { sprite, nameText, username });
+        console.log('Created remote player:', username);
+    }
+
+    removeRemotePlayer(clientId) {
+        const remote = this.remotePlayers.get(clientId);
+        if (remote) {
+            remote.sprite.destroy();
+            remote.nameText.destroy();
+            this.remotePlayers.delete(clientId);
+        }
     }
 }

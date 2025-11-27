@@ -5,7 +5,7 @@ if (typeof Phaser !== 'undefined') {
     // Ajouter les scènes à la configuration
     const config = {
         ...gameConfig,
-        scene: [MenuScene, OptionsScene, CharacterSelectScene, GameScene, UIScene, ShopScene, PauseScene]
+        scene: [MenuScene, OptionsScene, CharacterSelectScene, OnlineMenuScene, LobbyScene, GameScene, UIScene, ShopScene, PauseScene]
     };
 
     const game = new Phaser.Game(config);
@@ -15,7 +15,7 @@ if (typeof Phaser !== 'undefined') {
         const titleElement = document.querySelector('h1');
 
         // Écouter les changements de scène pour toutes les scènes
-        ['MenuScene', 'OptionsScene', 'CharacterSelectScene', 'GameScene', 'PauseScene'].forEach(sceneName => {
+        ['MenuScene', 'OptionsScene', 'CharacterSelectScene', 'OnlineMenuScene', 'LobbyScene', 'GameScene', 'PauseScene'].forEach(sceneName => {
             const scene = game.scene.getScene(sceneName);
             if (scene) {
                 scene.events.on('start', () => {

@@ -146,20 +146,21 @@ class MenuScene extends Phaser.Scene {
         };
 
         // Boutons
-        createButton(width * 0.5, height * 0.45, 'JOUER', () => this.scene.start('CharacterSelectScene'));
-        createButton(width * 0.5, height * 0.55, 'OPTIONS', () => this.scene.start('OptionsScene'), 0x4B5563); // Gris pour options
-        createButton(width * 0.5, height * 0.65, 'QUITTER', () => {
+        createButton(width * 0.5, height * 0.40, 'SOLO', () => this.scene.start('CharacterSelectScene'), 0x10B981); // Vert pour solo
+        createButton(width * 0.5, height * 0.50, 'ONLINE', () => this.scene.start('OnlineMenuScene'), 0x3B82F6); // Bleu pour online
+        createButton(width * 0.5, height * 0.60, 'OPTIONS', () => this.scene.start('OptionsScene'), 0x4B5563); // Gris pour options
+        createButton(width * 0.5, height * 0.70, 'QUITTER', () => {
             try { const { app } = require('electron'); app.quit(); } catch (e) { if (window.close) { window.close(); } }
         }, 0xEF4444); // Rouge pour quitter
 
         // Instructions discrètes
-        this.add.text(width * 0.5, height * 0.9, 'Appuyez sur ESPACE pour commencer', {
+        this.add.text(width * 0.5, height * 0.9, 'Appuyez sur ESPACE pour commencer en solo', {
             fontSize: '16px',
             fontFamily: 'Arial, sans-serif',
             fill: '#9CA3AF' // Gris clair
         }).setOrigin(0.5);
 
-        // Touche Espace ou Entrée pour jouer
+        // Touche Espace ou Entrée pour jouer en solo
         this.input.keyboard.on('keydown-SPACE', () => { this.scene.start('CharacterSelectScene'); });
         this.input.keyboard.on('keydown-ENTER', () => { this.scene.start('CharacterSelectScene'); });
     }
