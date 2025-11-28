@@ -140,11 +140,22 @@ jobs:
 
                 // 2. Upload Game Zip to Cloudinary
                 console.log("Starting upload_large for game.zip...");
-                const zipUpload = await cloudinary.uploader.upload_large(zipPath, {
-                  resource_type: "raw",
-                  public_id: `releases/${version}/game.zip`,
-                  overwrite: true,
-                  chunk_size: 6000000 // 6MB chunks
+                
+                const zipUpload = await new Promise((resolve, reject) => {
+                  cloudinary.uploader.upload_large(zipPath, {
+                    resource_type: "raw",
+                    public_id: `releases/${version}/game.zip`,
+                    overwrite: true,
+                    chunk_size: 6000000 // 6MB chunks
+                  }, (error, result) => {
+                    if (error) {
+                      console.error("Upload Error Callback:", error);
+                      reject(error);
+                    } else {
+                      console.log("Upload Success Callback:", result);
+                      resolve(result);
+                    }
+                  });
                 });
                 
                 console.log("Upload Result Type:", typeof zipUpload);
