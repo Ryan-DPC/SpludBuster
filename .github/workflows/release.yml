@@ -99,11 +99,12 @@ jobs:
                 console.log(`Hash: ${hash}`);
 
                 // 2. Upload Game Zip to Cloudinary
-                console.log("Uploading game.zip to Cloudinary...");
-                const zipUpload = await cloudinary.uploader.upload(zipPath, {
+                console.log("Uploading game.zip to Cloudinary (chunked)...");
+                const zipUpload = await cloudinary.uploader.upload_large(zipPath, {
                   resource_type: "raw",
                   public_id: `releases/${version}/game.zip`,
-                  overwrite: true
+                  overwrite: true,
+                  chunk_size: 6000000 // 6MB chunks
                 });
                 
                 console.log("Game Zip Uploaded:", zipUpload.secure_url);
