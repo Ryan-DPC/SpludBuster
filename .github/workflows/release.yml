@@ -24,6 +24,8 @@ jobs:
         run: npm ci
 
       - name: Build Game
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           npm run build --if-present
           # Fallback for demo if build doesn't create dist
