@@ -114,6 +114,7 @@ jobs:
         env:
           CLOUDINARY_URL: ${{ secrets.CLOUDINARY_URL }}
           TAG_NAME: ${{ needs.create-tag.outputs.new_tag }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           node -e '
             const fs = require("fs");
@@ -125,6 +126,7 @@ jobs:
                 console.log("Cloudinary SDK Version:", require("cloudinary/package.json").version);
                 
                 const version = process.env.TAG_NAME;
+                const repo = process.env.GITHUB_REPOSITORY;
                 const zipPath = "game.zip";
                 
                 // 1. Calculate Hash and Size
@@ -138,35 +140,10 @@ jobs:
                 console.log(`Size: ${size} bytes`);
                 console.log(`Hash: ${hash}`);
 
-                // 2. Upload Game Zip to Cloudinary
-                console.log("Starting upload_large for game.zip...");
-                
-                const zipUpload = await new Promise((resolve, reject) => {
-                  cloudinary.uploader.upload_large(zipPath, {
-                    resource_type: "raw",
-                    public_id: `releases/${version}/game.zip`,
-                    overwrite: true,
-                    chunk_size: 6000000 // 6MB chunks
-                  }, (error, result) => {
-                    if (error) {
-                      console.error("Upload Error Callback:", error);
-                      reject(error);
-                    } else {
-                      console.log("Upload Success Callback:", result);
-                      resolve(result);
-                    }
-                  });
-                });
-                
-                console.log("Upload Result Type:", typeof zipUpload);
-                console.log("Full Upload Response:", JSON.stringify(zipUpload, null, 2));
-
-                if (!zipUpload || (!zipUpload.secure_url && !zipUpload.url)) {
-                  throw new Error("Upload failed: No secure_url or url in response");
-                }
-
-                const downloadUrl = zipUpload.secure_url || zipUpload.url;
-                console.log("Game Zip Uploaded URL:", downloadUrl);
+                // 2. Construct GitHub Release URL (Cloudinary limit workaround)
+                // Cloudinary Free Tier has a 10MB limit for raw files, so we use GitHub Releases for hosting.
+                const downloadUrl = `https://github.com/${repo}/releases/download/${version}/game.zip`;
+                console.log("Using GitHub Release URL:", downloadUrl);
 
                 // 3. Create Manifest
                 const manifest = {
