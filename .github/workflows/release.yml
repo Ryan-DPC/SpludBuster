@@ -109,7 +109,6 @@ jobs:
 
       - name: Install Cloudinary SDK
         run: npm install cloudinary
-
       - name: Generate Manifest and Upload
         env:
           CLOUDINARY_URL: ${{ secrets.CLOUDINARY_URL }}
@@ -120,62 +119,54 @@ jobs:
             const fs = require("fs");
             const crypto = require("crypto");
             const cloudinary = require("cloudinary").v2;
+            let pkg = {};
+            try { pkg = require("./package.json"); } catch (e) {}
 
             async function run() {
               try {
-                console.log("Cloudinary SDK Version:", require("cloudinary/package.json").version);
-                
                 const version = process.env.TAG_NAME;
                 const repo = process.env.GITHUB_REPOSITORY;
+                const repoName = repo.split("/")[1]; // ex: "Backend_Ether" -> "Backend_Ether"
                 const zipPath = "game.zip";
                 
-                // 1. Calculate Hash and Size
                 const fileBuffer = fs.readFileSync(zipPath);
                 const hash = crypto.createHash("sha256").update(fileBuffer).digest("hex");
                 const stats = fs.statSync(zipPath);
-                const size = stats.size;
-                const date = new Date().toISOString();
-
-                console.log(`Version: ${version}`);
-                console.log(`Size: ${size} bytes`);
-                console.log(`Hash: ${hash}`);
-
-                // 2. Construct GitHub Release URL (Cloudinary limit workaround)
-                // Cloudinary Free Tier has a 10MB limit for raw files, so we use GitHub Releases for hosting.
+                
                 const downloadUrl = `https://github.com/${repo}/releases/download/${version}/game.zip`;
-                console.log("Using GitHub Release URL:", downloadUrl);
 
-                // 3. Create Manifest
+                // Création du manifeste avec les métadonnées requises par le backend
                 const manifest = {
+                  gameName: pkg.displayName || pkg.name || repoName,
+                  description: pkg.description || "",
+                  developer: pkg.author || "Unknown",
+                  genre: pkg.genre || "Indie",
                   version: version,
-                  size: size,
+                  size: stats.size,
                   hash: hash,
-                  date: date,
-                  downloadUrl: downloadUrl
+                  date: new Date().toISOString(),
+                  downloadUrl: downloadUrl,
+                  platform: "exe" // Change à "web" si c est un jeu web
                 };
                 
                 fs.writeFileSync("manifest.json", JSON.stringify(manifest, null, 2));
-                console.log("manifest.json created:", JSON.stringify(manifest, null, 2));
-
-                // 4. Upload Manifest to Cloudinary
-                console.log("Uploading manifest.json to Cloudinary...");
-                const manifestUpload = await cloudinary.uploader.upload("manifest.json", {
+                
+                // Upload vers manifests/{nom_du_repo}.json pour que le backend le trouve
+                const publicId = `manifests/${repoName}.json`;
+                console.log(`Uploading to ${publicId}...`);
+                
+                await cloudinary.uploader.upload("manifest.json", {
                   resource_type: "raw",
-                  public_id: `releases/${version}/manifest.json`,
+                  public_id: publicId,
                   overwrite: true
                 });
-                
-                console.log("Manifest Uploaded:", manifestUpload.secure_url);
-                
               } catch (error) {
-                console.error("FATAL ERROR in script:", error);
+                console.error("FATAL ERROR:", error);
                 process.exit(1);
               }
             }
-
             run();
           '
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
