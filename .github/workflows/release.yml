@@ -122,6 +122,8 @@ jobs:
 
             async function run() {
               try {
+                console.log("Cloudinary SDK Version:", require("cloudinary/package.json").version);
+                
                 const version = process.env.TAG_NAME;
                 const zipPath = "game.zip";
                 
@@ -137,7 +139,7 @@ jobs:
                 console.log(`Hash: ${hash}`);
 
                 // 2. Upload Game Zip to Cloudinary
-                console.log("Uploading game.zip to Cloudinary (chunked)...");
+                console.log("Starting upload_large for game.zip...");
                 const zipUpload = await cloudinary.uploader.upload_large(zipPath, {
                   resource_type: "raw",
                   public_id: `releases/${version}/game.zip`,
@@ -145,9 +147,15 @@ jobs:
                   chunk_size: 6000000 // 6MB chunks
                 });
                 
-                console.log("Full Zip Upload Response:", JSON.stringify(zipUpload, null, 2));
+                console.log("Upload Result Type:", typeof zipUpload);
+                console.log("Full Upload Response:", JSON.stringify(zipUpload, null, 2));
+
+                if (!zipUpload || (!zipUpload.secure_url && !zipUpload.url)) {
+                  throw new Error("Upload failed: No secure_url or url in response");
+                }
+
                 const downloadUrl = zipUpload.secure_url || zipUpload.url;
-                console.log("Game Zip Uploaded:", downloadUrl);
+                console.log("Game Zip Uploaded URL:", downloadUrl);
 
                 // 3. Create Manifest
                 const manifest = {
@@ -159,7 +167,7 @@ jobs:
                 };
                 
                 fs.writeFileSync("manifest.json", JSON.stringify(manifest, null, 2));
-                console.log("manifest.json created.");
+                console.log("manifest.json created:", JSON.stringify(manifest, null, 2));
 
                 // 4. Upload Manifest to Cloudinary
                 console.log("Uploading manifest.json to Cloudinary...");
@@ -172,7 +180,7 @@ jobs:
                 console.log("Manifest Uploaded:", manifestUpload.secure_url);
                 
               } catch (error) {
-                console.error("Error in script:", error);
+                console.error("FATAL ERROR in script:", error);
                 process.exit(1);
               }
             }
